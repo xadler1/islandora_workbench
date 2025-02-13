@@ -2164,3 +2164,365 @@ class EntityReferenceRevisionsField:
         elif len(subvalues) == 0:
             return None
         return subvalues[0]
+
+class DataField:
+    """Functions for handling fields with text and other "simple" Drupal field data types,
+    e.g. fields that have a "{'value': 'xxx'}" structure such as plain text fields, ETDF
+    fields. All functions return a "entity" dictionary that is passed to Requests' "json"
+    parameter.
+
+    Note that text fields that are "formatted" (i.e., use text formats/output filters)
+    require a 'format' key in their JSON in addition to the 'value' key. Otherwise, markup
+    or other text filters won't be applied when rendered.
+
+    Note: this class assumes that the entity has the field identified in 'field_name'.
+    Callers should pre-emptively confirm that. For an example, see code near the top
+    of workbench.update().
+
+    Also note: the required Drupal field 'title' is not processed by this class.
+    """
+
+    def create(self, config, field_definitions, entity, row, field_name):
+        """Parameters
+        ----------
+         config : dict
+             The configuration settings defined by workbench_config.get_config().
+         field_definitions : dict
+             The field definitions object defined by get_field_definitions().
+         entity : dict
+             The dict that will be POSTed to Drupal as JSON.
+         row : OrderedDict.
+             The current CSV record.
+         field_name : string
+             The Drupal fieldname/CSV column header.
+         Returns
+         -------
+         dictionary
+             A dictionary represeting the entity that is POSTed to Drupal as JSON.
+        """
+        if not row[field_name]:
+            return entity
+
+        if field_name in config["field_text_format_ids"]:
+            text_format = config["field_text_format_ids"][field_name]
+        else:
+            text_format = config["text_format_id"]
+
+        id_field = row.get(config.get("id_field", "not_applicable"), "not_applicable")
+        field_values = []
+        subvalues = str(row[field_name]).split(config["subdelimiter"])
+        #subvalues = self.remove_invalid_values(
+        #    config, field_definitions, field_name, subvalues
+        #)
+        #subvalues = self.dedupe_values(subvalues)
+
+        cardinality = int(field_definitions[field_name].get("cardinality", -1))
+        if -1 < cardinality < len(subvalues):
+            log_field_cardinality_violation(field_name, id_field, str(cardinality))
+            subvalues = subvalues[:cardinality]
+
+        temp_entity = {}
+        for subvalue in subvalues:
+            subsubvalue = subvalue.split("&")
+            i = 0
+            for subfield in field_definitions[field_name]["subfields"]:
+                temp_row = row
+                temp_name = field_name + "__" + field_definitions[field_name]["subfields"][subfield]["name"]
+                temp_row[temp_name] = subsubvalue[i]
+                temp_field_definitions = field_definitions
+                temp_field_definitions[temp_name] = field_definitions[field_name]["subfields"][subfield]
+                if temp_field_definitions[temp_name]["field_type"] == "entity_reference":
+                    entity_reference_field = EntityReferenceField()
+                    temp_entity = entity_reference_field.create(
+                        config, temp_field_definitions, temp_entity, temp_row, temp_name
+                    )
+
+                else:
+                    simple_field = SimpleField()
+                    temp_entity = simple_field.create(
+                        config, field_definitions, temp_entity, temp_row, temp_name
+                    )
+                i += 1
+
+        #field_values = self.dedupe_values(field_values)
+        #entity[field_name] = field_values
+
+        entity[field_name] = []
+
+        temp_dict = {}
+        for field in temp_entity:
+            original_field_name= str(field).replace(field_name + "__", "")
+            if "value" in temp_entity[field][0]:
+                temp_dict[original_field_name] = temp_entity[field][0]["value"]
+            else:
+                temp_dict[original_field_name] = temp_entity[field]
+
+        entity[field_name].append(temp_dict)
+
+        return entity
+
+    def update(
+            self, config, field_definitions, entity, row, field_name, entity_field_values
+    ):
+        """Note: this method appends incoming CSV values to existing values, replaces existing field
+        values with incoming values, or deletes all values from fields, depending on whether
+        config['update_mode'] is 'append', 'replace', or 'delete'. It doesn not replace individual
+        values within fields.
+        """
+        """Parameters
+           ----------
+            config : dict
+                The configuration settings defined by workbench_config.get_config().
+            field_definitions : dict
+                The field definitions object defined by get_field_definitions().
+            entity : dict
+                The dict that will be POSTed to Drupal as JSON.
+            row : OrderedDict.
+                The current CSV record.
+            field_name : string
+                The Drupal fieldname/CSV column header.
+            entity_field_values : list
+                List of dictionaries containing existing value(s) for field_name in the entity being updated.
+            Returns
+            -------
+            dictionary
+                A dictionary represeting the entity that is PATCHed to Drupal as JSON.
+        """
+        if config["update_mode"] == "delete":
+            entity[field_name] = []
+            return entity
+
+        if not row[field_name]:
+            return entity
+
+        if field_name not in entity:
+            entity[field_name] = []
+
+        if field_name in config["field_text_format_ids"]:
+            text_format = config["field_text_format_ids"][field_name]
+        else:
+            text_format = config["text_format_id"]
+
+        if config["task"] == "update_terms":
+            entity_id_field = "term_id"
+        if config["task"] == "update":
+            entity_id_field = "node_id"
+        if config["task"] == "update_media":
+            entity_id_field = "media_id"
+
+        cardinality = int(field_definitions[field_name].get("cardinality", -1))
+        if config["update_mode"] == "append":
+            subvalues = str(row[field_name]).split(config["subdelimiter"])
+            subvalues = self.remove_invalid_values(
+                config, field_definitions, field_name, subvalues
+            )
+            for subvalue in subvalues:
+                subvalue = truncate_csv_value(
+                    field_name,
+                    row[entity_id_field],
+                    field_definitions[field_name],
+                    subvalue,
+                )
+                if (
+                        "formatted_text" in field_definitions[field_name]
+                        and field_definitions[field_name]["formatted_text"] is True
+                ):
+                    entity[field_name].append(
+                        {"value": subvalue, "format": text_format}
+                    )
+                else:
+                    if field_definitions[field_name][
+                        "field_type"
+                    ] == "integer" and value_is_numeric(subvalue):
+                        subvalue = int(subvalue)
+                    if field_definitions[field_name][
+                        "field_type"
+                    ] == "float" and value_is_numeric(subvalue, allow_decimals=True):
+                        subvalue = float(subvalue)
+                    entity[field_name].append({"value": subvalue})
+            entity[field_name] = self.dedupe_values(entity[field_name])
+            if -1 < cardinality < len(entity[field_name]):
+                log_field_cardinality_violation(
+                    field_name, row[entity_id_field], str(cardinality)
+                )
+                entity[field_name] = entity[field_name][:cardinality]
+        if config["update_mode"] == "replace":
+            field_values = []
+            subvalues = str(row[field_name]).split(config["subdelimiter"])
+            subvalues = self.remove_invalid_values(
+                config, field_definitions, field_name, subvalues
+            )
+            subvalues = self.dedupe_values(subvalues)
+            if -1 < cardinality < len(subvalues):
+                log_field_cardinality_violation(
+                    field_name, row[entity_id_field], str(cardinality)
+                )
+                subvalues = subvalues[:cardinality]
+            for subvalue in subvalues:
+                subvalue = truncate_csv_value(
+                    field_name,
+                    row[entity_id_field],
+                    field_definitions[field_name],
+                    subvalue,
+                )
+                if (
+                        "formatted_text" in field_definitions[field_name]
+                        and field_definitions[field_name]["formatted_text"] is True
+                ):
+                    field_values.append({"value": subvalue, "format": text_format})
+                else:
+                    if field_definitions[field_name][
+                        "field_type"
+                    ] == "integer" and value_is_numeric(subvalue):
+                        subvalue = int(subvalue)
+                    if field_definitions[field_name][
+                        "field_type"
+                    ] == "float" and value_is_numeric(subvalue, allow_decimals=True):
+                        subvalue = float(subvalue)
+                    field_values.append({"value": subvalue})
+            field_values = self.dedupe_values(field_values)
+            entity[field_name] = field_values
+
+        return entity
+
+    def dedupe_values(self, values):
+        """Removes duplicate entries from 'values'."""
+        """Parameters
+           ----------
+            values : list
+                List containing value(s) to dedupe. Members could be strings
+                from CSV or dictionairies.
+            Returns
+            -------
+            list
+                A list of unique field values.
+        """
+        return deduplicate_field_values(values)
+
+    def remove_invalid_values(self, config, field_definitions, field_name, values):
+        """Removes invalid entries from 'values'."""
+        """Parameters
+           ----------
+            config : dict
+                The configuration settings defined by workbench_config.get_config().
+            field_definitions : dict
+                The field definitions object defined by get_field_definitions().
+            field_name : string
+                The Drupal fieldname/CSV column header.
+            values : list
+                List containing strings split from CSV values.
+            Returns
+            -------
+            list
+                A list of valid field values.
+        """
+        if "field_type" not in field_definitions[field_name]:
+            return values
+
+        if field_definitions[field_name]["field_type"] == "edtf":
+            valid_values = list()
+            for subvalue in values:
+                if validate_edtf_date(subvalue) is True:
+                    valid_values.append(subvalue)
+                else:
+                    message = (
+                            'Value "'
+                            + subvalue
+                            + '" in field "'
+                            + field_name
+                            + '" is not a valid EDTF field value.'
+                    )
+                    logging.warning(message)
+            return valid_values
+        elif field_definitions[field_name]["field_type"] == "integer":
+            valid_values = list()
+            for subvalue in values:
+                if value_is_numeric(subvalue) is True:
+                    valid_values.append(subvalue)
+                else:
+                    message = (
+                            'Value "'
+                            + subvalue
+                            + '" in field "'
+                            + field_name
+                            + '" is not a valid integer field value.'
+                    )
+                    logging.warning(message)
+            return valid_values
+        elif field_definitions[field_name]["field_type"] in ["decimal", "float"]:
+            valid_values = list()
+            for subvalue in values:
+                if value_is_numeric(subvalue, allow_decimals=True) is True:
+                    valid_values.append(subvalue)
+                else:
+                    message = (
+                            'Value "'
+                            + subvalue
+                            + '" in field "'
+                            + field_name
+                            + '" is not a valid '
+                            + field_definitions[field_name]["field_type"]
+                            + " field value."
+                    )
+                    logging.warning(message)
+            return valid_values
+        elif field_definitions[field_name]["field_type"] == "list_string":
+            valid_values = list()
+            for subvalue in values:
+                if subvalue in field_definitions[field_name]["allowed_values"]:
+                    valid_values.append(subvalue)
+                else:
+                    message = (
+                            'Value "'
+                            + subvalue
+                            + '" in field "'
+                            + field_name
+                            + "\" is not in the field's list of allowed values."
+                    )
+                    logging.warning(message)
+            return valid_values
+        else:
+            # For now, just return values if the field is not an EDTF field.
+            return values
+
+    def serialize(self, config, field_definitions, field_name, field_data):
+        """Serialized values into a format consistent with Workbench's CSV-field input format."""
+        """Parameters
+           ----------
+            config : dict
+                The configuration settings defined by workbench_config.get_config().
+            field_definitions : dict
+                The field definitions object defined by get_field_definitions().
+            field_name : string
+                The Drupal fieldname/CSV column header.
+            field_data : string
+                Raw JSON from the field named 'field_name'.
+            Returns
+            -------
+            string
+                A string structured same as the Workbench CSV field data for this field type,
+                or None if there is nothing to return.
+        """
+        if "field_type" not in field_definitions[field_name]:
+            return None
+
+        subvalues = list()
+        for subvalue in field_data:
+            if "value" in subvalue:
+                subvalues.append(subvalue["value"])
+            else:
+                logging.warning(
+                    "Field data "
+                    + str(field_data)
+                    + ' in field "'
+                    + field_name
+                    + '" cannot be serialized by the SimpleField handler.'
+                )
+                return ""
+
+        if len(subvalues) > 1:
+            return config["subdelimiter"].join(subvalues)
+        elif len(subvalues) == 0:
+            return None
+        else:
+            return subvalues[0]

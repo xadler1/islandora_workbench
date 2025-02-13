@@ -364,6 +364,13 @@ def create():
                     config, field_definitions, node, row, custom_field
                 )
 
+            # Datafield fields.
+            elif field_definitions[custom_field]["field_type"] == "data_field":
+                data_field = workbench_fields.DataField()
+                node = data_field.create(
+                    config, field_definitions, node, row, custom_field
+                )
+
             # For non-entity reference and non-typed relation fields (text, integer, boolean etc.).
             else:
                 simple_field = workbench_fields.SimpleField()
