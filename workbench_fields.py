@@ -2203,67 +2203,12 @@ class DataField:
         if not row[field_name]:
             return entity
 
-        if field_name in config["field_text_format_ids"]:
-            text_format = config["field_text_format_ids"][field_name]
-        else:
-            text_format = config["text_format_id"]
-
-        id_field = row.get(config.get("id_field", "not_applicable"), "not_applicable")
-
-        subvalues = str(row[field_name]).split(config["subdelimiter"])
-        subvalues = self.remove_invalid_values(
-            config, field_definitions, field_name, subvalues
-        )
-        subvalues = self.dedupe_values(subvalues)
-
-        cardinality = int(field_definitions[field_name].get("cardinality", -1))
-        if -1 < cardinality < len(subvalues):
-            log_field_cardinality_violation(field_name, id_field, str(cardinality))
-            subvalues = subvalues[:cardinality]
-
         entity[field_name] = []
-        for subvalue in subvalues:
-            temp_entity = {}
-            subsubvalue = subvalue.split("&")
-            i = 0
-            for subfield in field_definitions[field_name]["subfields"]:
-                # temporarily add subfields to csv row
-                temp_row = row
-                temp_name = field_name + "__" + field_definitions[field_name]["subfields"][subfield]["name"]
-                temp_row[temp_name] = str(subsubvalue[i])
-                temp_field_definitions = field_definitions
-                temp_field_definitions[temp_name] = field_definitions[field_name]["subfields"][subfield]
-                if temp_field_definitions[temp_name]["field_type"] == "entity_reference":
-                    entity_reference_field = EntityReferenceField()
-                    temp_entity = entity_reference_field.create(
-                        config, temp_field_definitions, temp_entity, temp_row, temp_name
-                    )
-                else:
-                    simple_field = SimpleField()
-                    temp_entity = simple_field.create(
-                        config, field_definitions, temp_entity, temp_row, temp_name
-                    )
-                i += 1
 
-            temp_dict = {}
-
-            for field in temp_entity:
-                original_field_name = str(field).replace(field_name + "__", "")
-                if "value" in temp_entity[field][0]:
-                    temp_dict[original_field_name] = temp_entity[field][0]["value"]
-                elif "target_id" in temp_entity[field][0]:
-                    temp_dict[original_field_name] = temp_entity[field][0]["target_id"]
-                else:
-                    temp_dict[original_field_name] = temp_entity[field]
-
-            entity[field_name].append(temp_dict)
-
-
-        entity[field_name] = self.dedupe_values(entity[field_name])
+        entity = self.datafield_insert_values_from_csv(config, entity, field_definitions, row, field_name)
 
         return entity
 
-# TODO: test  update_replace mode
     def update(
             self, config, field_definitions, entity, row, field_name, entity_field_values
     ):
@@ -2301,135 +2246,117 @@ class DataField:
         if field_name not in entity:
             entity[field_name] = []
 
-        cardinality = int(field_definitions[field_name].get("cardinality", -1))
         if config["update_mode"] == "append":
             for element in entity_field_values:
+                element = self.datafield_normalize_values(element, field_definitions, field_name)
+
                 for field in field_definitions[field_name]["subfields"]:
-                    if (not bool(element[field])) or (isinstance(element[field], list) and len(element[field]) == 0):
+                    if (len(element[field]) == 0):
                         del element[field]
-                        continue
-                    elif isinstance(element[field], dict) and "tid" in element[field]:
-                        element[field] = element[field]["tid"][0]["value"]
-                    elif isinstance(element[field], dict) and "nid" in element[field]:
-                        element[field] = element[field]["nid"][0]["value"]
-                    elif isinstance(element[field], dict) and "fid" in element[field]:
-                        element[field] = element[field]["fid"][0]["value"]
-                    elif isinstance(element[field], dict) and "url" in element[field]:
-                        element[field] = element[field]["url"]
-                    elif isinstance(element[field], dict) and "value" in element[field]:
-                        element[field] = element[field]["value"]
-                    elif field_definitions[field_name]["subfields"][field]["type"] == "json":
-                        element[field] = json.dumps(json.loads(element[field]))
-                        print()
-                    # the type of subfield must match to remove duplicate items
-                    if isinstance(element[field], bool):
-                        continue
-                    element[field] = str(element[field])
+
                 entity[field_name].append(element)
-            subvalues = str(row[field_name]).split(config["subdelimiter"])
-            subvalues = self.remove_invalid_values(
-                config, field_definitions, field_name, subvalues
-            )
-            for subvalue in subvalues:
-                temp_entity = {}
-                subsubvalue = subvalue.split("&")
-                i = 0
-                for subfield in field_definitions[field_name]["subfields"]:
-                    # temporarily add subfields to csv row
-                    temp_row = row
-                    temp_name = field_name + "__" + field_definitions[field_name]["subfields"][subfield]["name"]
-                    temp_row[temp_name] = subsubvalue[i]
-                    temp_field_definitions = field_definitions
-                    temp_field_definitions[temp_name] = field_definitions[field_name]["subfields"][subfield]
-                    if temp_field_definitions[temp_name]["field_type"] == "entity_reference":
-                        entity_reference_field = EntityReferenceField()
-                        temp_entity = entity_reference_field.create(
-                            config, temp_field_definitions, temp_entity, temp_row, temp_name
-                        )
-                    else:
-                        simple_field = SimpleField()
-                        temp_entity = simple_field.create(
-                            config, field_definitions, temp_entity, temp_row, temp_name
-                        )
-                        # json field must be normalized for deduplication to work properly
-                        if temp_field_definitions[temp_name]["field_type"] == "json":
-                            temp_entity[temp_name][0]["value"] = json.dumps(json.loads(temp_entity[temp_name][0]["value"]))
-                    i += 1
 
-                temp_dict = {}
-
-                for field in temp_entity:
-                    original_field_name = str(field).replace(field_name + "__", "")
-                    if "value" in temp_entity[field][0]:
-                        temp_dict[original_field_name] = temp_entity[field][0]["value"]
-                    elif "target_id" in temp_entity[field][0]:
-                        temp_dict[original_field_name] = temp_entity[field][0]["target_id"]
-                    else:
-                        temp_dict[original_field_name] = temp_entity[field]
-                    if isinstance(temp_dict[original_field_name], bool):
-                        continue
-                    # All field values are converted for deduplication
-                    temp_dict[original_field_name] = str(temp_dict[original_field_name])
-
-                entity[field_name].append(temp_dict)
-            entity[field_name] = self.dedupe_values(entity[field_name])
-            if cardinality != -1:
-                entity[field_name] = entity[field_name:cardinality]
+            entity = self.datafield_insert_values_from_csv(config, entity, field_definitions, row, field_name)
 
         if config["update_mode"] == "replace":
             entity[field_name] = []
-            subvalues = str(row[field_name]).split(config["subdelimiter"])
-            subvalues = self.remove_invalid_values(
-                config, field_definitions, field_name, subvalues
-            )
-            for subvalue in subvalues:
-                temp_entity = {}
-                subsubvalue = subvalue.split("&")
-                i = 0
-                for subfield in field_definitions[field_name]["subfields"]:
-                    # temporarily add subfields to csv row
-                    temp_row = row
-                    temp_name = field_name + "__" + field_definitions[field_name]["subfields"][subfield]["name"]
-                    temp_row[temp_name] = subsubvalue[i]
-                    temp_field_definitions = field_definitions
-                    temp_field_definitions[temp_name] = field_definitions[field_name]["subfields"][subfield]
-                    if temp_field_definitions[temp_name]["field_type"] == "entity_reference":
-                        entity_reference_field = EntityReferenceField()
-                        temp_entity = entity_reference_field.create(
-                            config, temp_field_definitions, temp_entity, temp_row, temp_name
-                        )
-                    else:
-                        simple_field = SimpleField()
-                        temp_entity = simple_field.create(
-                            config, field_definitions, temp_entity, temp_row, temp_name
-                        )
-                        # json field must be normalized for deduplication to work properly
-                        if temp_field_definitions[temp_name]["field_type"] == "json":
-                            temp_entity[temp_name][0]["value"] = json.dumps(json.loads(temp_entity[temp_name][0]["value"]))
-                    i += 1
-
-                temp_dict = {}
-
-                for field in temp_entity:
-                    original_field_name = str(field).replace(field_name + "__", "")
-                    if "value" in temp_entity[field][0]:
-                        temp_dict[original_field_name] = temp_entity[field][0]["value"]
-                    elif "target_id" in temp_entity[field][0]:
-                        temp_dict[original_field_name] = temp_entity[field][0]["target_id"]
-                    else:
-                        temp_dict[original_field_name] = temp_entity[field]
-                    if isinstance(temp_dict[original_field_name], bool):
-                        continue
-                    temp_dict[original_field_name] = str(temp_dict[original_field_name])
-
-                entity[field_name].append(temp_dict)
-            entity[field_name] = self.dedupe_values(entity[field_name])
-            if cardinality != -1:
-                entity[field_name] = entity[field_name:cardinality]
+            entity = self.datafield_insert_values_from_csv(config, entity, field_definitions, row, field_name)
 
         return entity
 
-    #def datafield_insert_values_from_csv(self, config, entity, field_definitions, row, field_name, entity_field_values):
+    def datafield_insert_values_from_csv(self, config, entity, field_definitions, row, field_name):
+        """Parameters
+           ----------
+            config : dict
+                The configuration settings defined by workbench_config.get_config().
+            field_definitions : dict
+                The field definitions object defined by get_field_definitions().
+            entity : dict
+                The dict that will be POSTed to Drupal as JSON.
+            row : OrderedDict.
+                The current CSV record.
+            field_name : string
+                The Drupal fieldname/CSV column header.
+            Returns
+            -------
+            dictionary
+                A dictionary represeting the entity that is PATCHed to Drupal as JSON.
+        """
+        cardinality = int(field_definitions[field_name].get("cardinality", -1))
+        subvalues = str(row[field_name]).split(config["subdelimiter"])
+        subvalues = self.remove_invalid_values(
+            config, field_definitions, field_name, subvalues
+        )
+        for subvalue in subvalues:
+            temp_entity = {}
+            subsubvalue = subvalue.split("&")
+            i = 0
+            for subfield in field_definitions[field_name]["subfields"]:
+                # temporarily add subfields to csv row
+                temp_row = row
+                temp_name = field_name + "__" + field_definitions[field_name]["subfields"][subfield]["name"]
+                temp_row[temp_name] = subsubvalue[i]
+                temp_field_definitions = field_definitions
+                temp_field_definitions[temp_name] = field_definitions[field_name]["subfields"][subfield]
+                if temp_field_definitions[temp_name]["field_type"] == "entity_reference":
+                    entity_reference_field = EntityReferenceField()
+                    temp_entity = entity_reference_field.create(
+                        config, temp_field_definitions, temp_entity, temp_row, temp_name
+                    )
+                else:
+                    simple_field = SimpleField()
+                    temp_entity = simple_field.create(
+                        config, field_definitions, temp_entity, temp_row, temp_name
+                    )
+                    # json field must be normalized for deduplication to work properly
+                    if temp_field_definitions[temp_name]["field_type"] == "json":
+                        temp_entity[temp_name][0]["value"] = json.dumps(json.loads(temp_entity[temp_name][0]["value"]))
+                i += 1
+
+            temp_dict = {}
+
+            for field in temp_entity:
+                original_field_name = str(field).replace(field_name + "__", "")
+                if "value" in temp_entity[field][0]:
+                    temp_dict[original_field_name] = temp_entity[field][0]["value"]
+                elif "target_id" in temp_entity[field][0]:
+                    temp_dict[original_field_name] = temp_entity[field][0]["target_id"]
+                else:
+                    temp_dict[original_field_name] = temp_entity[field]
+                if isinstance(temp_dict[original_field_name], bool):
+                    continue
+                # All field values are converted for deduplication
+                temp_dict[original_field_name] = str(temp_dict[original_field_name])
+
+            entity[field_name].append(temp_dict)
+        entity[field_name] = self.dedupe_values(entity[field_name])
+        if cardinality != -1:
+            entity[field_name] = entity[field_name:cardinality]
+
+        return entity
+
+    def datafield_normalize_values(self, element, field_definitions, field_name):
+        for field in field_definitions[field_name]["subfields"]:
+            if (not bool(element[field])) or (isinstance(element[field], list) and len(element[field]) == 0):
+                element[field] = ""
+            elif isinstance(element[field], dict) and "tid" in element[field]:
+                element[field] = element[field]["tid"][0]["value"]
+            elif isinstance(element[field], dict) and "nid" in element[field]:
+                element[field] = element[field]["nid"][0]["value"]
+            elif isinstance(element[field], dict) and "fid" in element[field]:
+                element[field] = element[field]["fid"][0]["value"]
+            elif isinstance(element[field], dict) and "url" in element[field]:
+                element[field] = element[field]["url"]
+            elif isinstance(element[field], dict) and "value" in element[field]:
+                element[field] = element[field]["value"]
+            elif field_definitions[field_name]["subfields"][field]["type"] == "json":
+                element[field] = json.dumps(json.loads(element[field]))
+            # the type of subfield must match to remove duplicate items
+            if isinstance(element[field], bool):
+                element[field] = int(element[field])
+            element[field] = str(element[field])
+
+        return element
 
     def dedupe_values(self, values):
         """Removes duplicate entries from 'values'."""
@@ -2494,17 +2421,12 @@ class DataField:
 
         subvalues = list()
         for subvalue in field_data:
-            if "value" in subvalue:
-                subvalues.append(subvalue["value"])
-            else:
-                logging.warning(
-                    "Field data "
-                    + str(field_data)
-                    + ' in field "'
-                    + field_name
-                    + '" cannot be serialized by the SimpleField handler.'
-                )
-                return ""
+            subsubvalues = list()
+            for field in field_definitions[field_name]["subfields"]:
+                subvalue = self.datafield_normalize_values(subvalue, field_definitions, field_name)
+                subsubvalues.append(str(subvalue[field]))
+            subsubvalues = "&".join(subsubvalues)
+            subvalues.append(subsubvalues)
 
         if len(subvalues) > 1:
             return config["subdelimiter"].join(subvalues)

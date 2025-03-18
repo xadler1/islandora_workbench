@@ -10378,55 +10378,8 @@ def serialize_field_json(config, field_definitions, field_name, field_data):
         string
             A string structured same as the Workbench CSV field data for the field type.
     """
-    # Importing the workbench_fields module at the top of this module with the
-    # rest of the imports causes a circular import exception, so we do it here.
-    import workbench_fields
-
-    # Assemble CSV output Drupal field data. If new field types are added to
-    # workbench_fields.py, they need to be registered in the following if/elif/else block.
-
-    # Entity reference fields (taxonomy term and node).
-    if field_definitions[field_name]["field_type"] == "entity_reference":
-        serialized_field = workbench_fields.EntityReferenceField()
-        csv_field_data = serialized_field.serialize(
-            config, field_definitions, field_name, field_data
-        )
-    # Entity reference revision fields (mostly paragraphs).
-    elif field_definitions[field_name]["field_type"] == "entity_reference_revisions":
-        serialized_field = workbench_fields.EntityReferenceRevisionsField()
-        csv_field_data = serialized_field.serialize(
-            config, field_definitions, field_name, field_data
-        )
-    # Typed relation fields (currently, only taxonomy term)
-    elif field_definitions[field_name]["field_type"] == "typed_relation":
-        serialized_field = workbench_fields.TypedRelationField()
-        csv_field_data = serialized_field.serialize(
-            config, field_definitions, field_name, field_data
-        )
-    # Geolocation fields.
-    elif field_definitions[field_name]["field_type"] == "geolocation":
-        serialized_field = workbench_fields.GeolocationField()
-        csv_field_data = serialized_field.serialize(
-            config, field_definitions, field_name, field_data
-        )
-    # Link fields.
-    elif field_definitions[field_name]["field_type"] == "link":
-        serialized_field = workbench_fields.LinkField()
-        csv_field_data = serialized_field.serialize(
-            config, field_definitions, field_name, field_data
-        )
-    # Authority Link fields.
-    elif field_definitions[field_name]["field_type"] == "authority_link":
-        serialized_field = workbench_fields.AuthorityLinkField()
-        csv_field_data = serialized_field.serialize(
-            config, field_definitions, field_name, field_data
-        )
-    # Simple fields.
-    else:
-        serialized_field = workbench_fields.SimpleField()
-        csv_field_data = serialized_field.serialize(
-            config, field_definitions, field_name, field_data
-        )
+    serialized_field = create_field_by_type(field_definitions[field_name]["field_type"])
+    csv_field_data = serialized_field.serialize(config, field_definitions, field_name, field_data)
 
     return csv_field_data
 
