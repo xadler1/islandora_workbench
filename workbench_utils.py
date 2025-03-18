@@ -1188,8 +1188,8 @@ def get_entity_field_definitions(config, fieldname, entity_type, bundle_type=Non
             field_definition["subfields"][subfield]["entity_type"] = entity_type
             field_definition["subfields"][subfield]["field_type"] = field_definition["subfields"][subfield]["type"]
             field_definition["subfields"][subfield]["label"] = field_config["settings"]["field_settings"][subfield]["label"]
-            field_definition["subfields"][subfield]["required"] = field_config["settings"]["field_settings"][subfield]["required"]
             field_definition["subfields"][subfield]["cardinality"] = 1
+            field_definition["subfields"][subfield]["required"] = False
             field_definition["subfields"][subfield]["handler"] = None
             field_definition["subfields"][subfield]["handler_settings"] = None
             field_definition["subfields"][subfield]["target_type"] = None
@@ -1197,13 +1197,14 @@ def get_entity_field_definitions(config, fieldname, entity_type, bundle_type=Non
             field_definition["subfields"][subfield]["allowed_values"] = None
             field_definition["subfields"][subfield]["formatted_text"] = False
 
+            if "required" in field_config["settings"]["field_settings"][subfield]:
+                field_definition["subfields"][subfield]["required"] = field_config["settings"]["field_settings"][subfield]["required"]
+
             if "entity_reference_type" in field_config["settings"]["field_settings"][subfield]:
                 field_definition["subfields"][subfield]["target_type"] = field_config["settings"]["field_settings"][subfield]["entity_reference_type"]
 
             if "target_bundles" in field_config["settings"]["field_settings"][subfield]:
                 field_definition["subfields"][subfield]["vocabularies"] = field_config["settings"]["field_settings"][subfield]["target_bundles"]
-
-        print()
 
     field_definition["required"] = field_config["required"]
     field_definition["label"] = field_config["label"]
@@ -11437,3 +11438,36 @@ def prompt_user(config):
                 f'Exiting because user responded "{response}" to prompt "{user_prompt}".'
             )
             sys.exit("Exiting at user prompts.")
+
+def create_field_by_type(type):
+    import workbench_fields
+    if type == "entity_reference":
+        return workbench_fields.EntityReferenceField()
+
+    # Entity reference revision fields (paragraphs).
+    elif type == "entity_reference_revisions":
+        return workbench_fields.EntityReferenceRevisionsField()
+
+    # Typed relation fields.
+    elif type == "typed_relation":
+        return workbench_fields.TypedRelationField()
+
+    # Geolocation fields.
+    elif type == "geolocation":
+        return workbench_fields.GeolocationField()
+
+    # Link fields.
+    elif type == "link":
+        return workbench_fields.LinkField()
+
+    # Authority Link fields.
+    elif type == "authority_link":
+        return workbench_fields.AuthorityLinkField()
+
+    # Datafield fields.
+    elif type == "data_field":
+        return workbench_fields.DataField()
+
+    # For non-entity reference and non-typed relation fields (text, integer, boolean etc.).
+    else:
+        return workbench_fields.SimpleField()
