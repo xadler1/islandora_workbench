@@ -6,5 +6,7 @@ root_path: "/home/adl/lindat/archaeo-vault/Final"
 # authorization token, can be obtained after login at https://archaeo-vault.cz/jwt/token
 auth_token: 
 
-# optional config
+# other config
+generate_import_files: true
+import_media: true
 
