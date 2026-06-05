@@ -1,0 +1,10 @@
+# Required options
+# ID of main dataset entity (see URL - https://archaeo-vault.cz/node/{ID})
+root_id: 68
+# path to root directory of dataset
+root_path: "/home/adl/lindat/archaeo-vault/Final"
+# authorization token, can be obtained after login at https://archaeo-vault.cz/jwt/token
+auth_token: 
+
+# optional config
+
