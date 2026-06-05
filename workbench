@@ -3085,7 +3085,7 @@ def create_redirects():
             is_redirect_url,
             allow_redirects=False,
             verify=config["secure_ssl_only"],
-            auth=(config["username"], config["password"]),
+            headers={"Authorization": "Bearer " + config["auth_token"]},
         )
         if str(is_redirect_response.status_code).startswith("30"):
             message = (

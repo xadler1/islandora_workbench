@@ -291,6 +291,7 @@ def issue_request(
                 query = dict()
 
             headers.update({"User-Agent": config["user_agent"]})
+            headers.update({"Authorization": "Bearer " + config["auth_token"]})
 
             # The trailing / is stripped in config, but we do it here too, just in case.
             config["host"] = config["host"].rstrip("/")
@@ -315,7 +316,6 @@ def issue_request(
                 url,
                 allow_redirects=config["allow_redirects"],
                 verify=config["secure_ssl_only"],
-                auth=(config["username"], config["password"]),
                 headers=headers,
                 json=json_data,
                 data=data,
@@ -3313,7 +3313,7 @@ def check_input(config: dict, args: Namespace) -> None:
             config["host"].rstrip("/") + "/entity/redirect?_format=json",
             allow_redirects=True,
             verify=config["secure_ssl_only"],
-            auth=(config["username"], config["password"]),
+            headers={"Authorization": "Bearer " + config["auth_token"]},
         )
         if endpoint_ping_response.status_code != 405:
             message = (
@@ -3358,7 +3358,7 @@ def check_input(config: dict, args: Namespace) -> None:
                 is_redirect_url,
                 allow_redirects=False,
                 verify=config["secure_ssl_only"],
-                auth=(config["username"], config["password"]),
+                headers={"Authorization": "Bearer " + config["auth_token"]},
             )
             if str(is_redirect_response.status_code).startswith("30"):
                 message = (
@@ -3383,7 +3383,7 @@ def check_input(config: dict, args: Namespace) -> None:
                 path_exists_url,
                 allow_redirects=False,
                 verify=config["secure_ssl_only"],
-                auth=(config["username"], config["password"]),
+                headers={"Authorization": "Bearer " + config["auth_token"]},
             )
             if path_exists_response.status_code == 404:
                 message = (
@@ -3428,13 +3428,13 @@ def check_input(config: dict, args: Namespace) -> None:
             config["paged_content_from_directories"] is False
             or config["paged_content_from_directories_parents_exist"] is False
         ):
-            # Temporary fix for https://github.com/mjordan/islandora_workbench/issues/478.
-            if config["task"] == "add_media":
-                config["id_field"] = "node_id"
-            if config["task"] == "update_media":
-                config["id_field"] = "media_id"
-            if config["task"] == "update_media_by_node":
-                config["id_field"] = "node_id"
+            ## Temporary fix for https://github.com/mjordan/islandora_workbench/issues/478.
+            #if config["task"] == "add_media":
+            #    config["id_field"] = "node_id"
+            #if config["task"] == "update_media":
+            #    config["id_field"] = "media_id"
+            #if config["task"] == "update_media_by_node":
+            #    config["id_field"] = "node_id"
 
             file_check_csv_data = get_csv_data(config)
             for count, file_check_row in enumerate(file_check_csv_data, start=1):
